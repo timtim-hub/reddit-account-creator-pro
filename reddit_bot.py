@@ -440,25 +440,42 @@ def run_bot():
                     pass
                         
                 # --- PASSWORD STEP (If it appears) ---
+                print("Checking for Password screen...")
                 try:
-                     pass_inputs = driver.find_elements(AppiumBy.XPATH, "//android.widget.EditText[@password='true']")
-                     if not pass_inputs:
-                         # Fallback: Check for any EditText if "Show password" is visible
-                         if driver.find_elements(AppiumBy.ACCESSIBILITY_ID, "Show password") or driver.find_elements(AppiumBy.XPATH, "//*[@content-desc='Show password']"):
-                             print("Found 'Show password' button, assuming Password screen.")
-                             pass_inputs = driver.find_elements(AppiumBy.CLASS_NAME, "android.widget.EditText")
+                     # Check if we are on a screen with password fields or text
+                     is_password_screen = False
+                     if driver.find_elements(AppiumBy.XPATH, "//*[contains(@text, 'password')]"):
+                         is_password_screen = True
                      
-                     if pass_inputs:
-                         pass_inputs[0].click()
-                         pass_inputs[0].send_keys(password) 
-                         print("Entered password.")
-                         time.sleep(1)
-                         try:
-                             # Try to find the now-enabled Continue button
-                             wait.until(EC.element_to_be_clickable((AppiumBy.XPATH, "//*[@text='Continue' or @text='Next']"))).click()
-                         except:
-                             driver.find_element(AppiumBy.ID, "com.reddit.frontpage:id/continue_button").click()
-                         time.sleep(5)
+                     if is_password_screen:
+                         pass_inputs = driver.find_elements(AppiumBy.XPATH, "//android.widget.EditText[@password='true']")
+                         if not pass_inputs:
+                             pass_inputs = driver.find_elements(AppiumBy.CLASS_NAME, "android.widget.EditText")
+                         
+                         if pass_inputs:
+                             # Often the last one if username is also there
+                             target_input = pass_inputs[-1]
+                             print(f"Entering password into input {len(pass_inputs)-1}...")
+                             target_input.click()
+                             target_input.send_keys(password)
+                             time.sleep(2)
+                             if driver.is_keyboard_shown(): driver.hide_keyboard()
+                             
+                             # Click Continue
+                             print("Clicking Continue after password...")
+                             try:
+                                 # Use ID if possible
+                                 wait.until(EC.element_to_be_clickable((AppiumBy.ID, "com.reddit.frontpage:id/continue_button"))).click()
+                                 print("Clicked Continue (ID).")
+                             except:
+                                 # Fallback to text
+                                 btns = driver.find_elements(AppiumBy.XPATH, "//*[@text='Continue' or @text='Next']")
+                                 for b in btns:
+                                     if b.is_enabled():
+                                         b.click()
+                                         print(f"Clicked {b.text} (Text Fallback).")
+                                         break
+                             time.sleep(5)
                 except Exception as e:
                     print(f"Password step error: {e}")
                     pass
@@ -467,10 +484,6 @@ def run_bot():
                 print("Handling Post-Signup Screens (Interests, Gender, Notifications)...")
                 for i in range(15): # More tries for complex onboarding
                     try:
-                        # DEBUG: Snapshot of what we're looking at
-                        if i % 5 == 0:
-                            driver.save_screenshot(f"onboarding_step_{i}_{email}.png")
-
                         # 1. Gender Selection
                         genders = driver.find_elements(AppiumBy.XPATH, "//*[@text='Man' or @text='Woman' or @text='Non-binary']")
                         if genders:
@@ -489,19 +502,16 @@ def run_bot():
                         # 2. Interests / Topics
                         # Look for text views that look like chips (short text, clickable)
                         # Reddit often has "Select at least 3"
-                        interests = driver.find_elements(AppiumBy.XPATH, "//android.widget.TextView[@clickable='true' and string-length(@text) > 2 and string-length(@text) < 20]")
-                        if not interests:
-                            # Fallback: check anything clickable in a scrollview or similar
-                            interests = driver.find_elements(AppiumBy.XPATH, "//*[@clickable='true' and (contains(@class, 'View') or contains(@class, 'Button')) and string-length(@text) > 0]")
+                        # Chips are often in ScrollViews and might not have 'clickable=true' but their parent might
+                        interests = driver.find_elements(AppiumBy.XPATH, "//android.widget.TextView[string-length(@text) > 2 and string-length(@text) < 20]")
+                        # Filter for things that look like tags (no spaces or specific patterns)
+                        interest_chips = [el for el in interests if el.text.strip() and " " not in el.text.strip() and el.text.lower() not in ["next", "continue", "skip"]]
                         
-                        if interests and len(interests) > 5: # Likely the interests screen
-                            print(f"[{i}] Found {len(interests)} potential interests. Selecting 5 to be safe...")
+                        if len(interest_chips) > 5: # Likely the interests screen
+                            print(f"[{i}] Found {len(interest_chips)} potential interests. Selecting 5...")
                             clicked_count = 0
-                            for item in interests:
+                            for item in interest_chips:
                                 try:
-                                    # Avoid clicking common navigation buttons as interests
-                                    if item.text.lower() in ["next", "continue", "skip", "log in", "sign up"]:
-                                        continue
                                     item.click()
                                     clicked_count += 1
                                     time.sleep(0.5)
@@ -511,10 +521,12 @@ def run_bot():
                             # Click Continue after selecting
                             time.sleep(2)
                             next_btns = driver.find_elements(AppiumBy.XPATH, "//*[@text='Next' or @text='Continue']")
-                            if next_btns: 
-                                print(f"[{i}] Clicking Next after picking {clicked_count} interests.")
-                                next_btns[0].click()
-                                time.sleep(3)
+                            for b in next_btns:
+                                if b.is_enabled():
+                                    print(f"[{i}] Clicking {b.text} after picking {clicked_count} interests.")
+                                    b.click()
+                                    time.sleep(3)
+                                    break
                             continue
 
                         # 3. Generic Action Buttons
@@ -526,7 +538,7 @@ def run_bot():
                         # Try dismiss buttons first
                         for d_text in dismiss_texts:
                             btns = driver.find_elements(AppiumBy.XPATH, f"//*[@text='{d_text}']")
-                            if btns and btns[0].is_displayed():
+                            if btns and btns[0].is_displayed() and btns[0].is_enabled():
                                 print(f"[{i}] Clicking '{d_text}'...")
                                 btns[0].click()
                                 found_action = True
@@ -536,7 +548,7 @@ def run_bot():
                             # Try advance buttons
                             for a_text in advance_texts:
                                 btns = driver.find_elements(AppiumBy.XPATH, f"//*[@text='{a_text}']")
-                                if btns and btns[0].is_displayed():
+                                if btns and btns[0].is_displayed() and btns[0].is_enabled():
                                     print(f"[{i}] Clicking '{a_text}'...")
                                     btns[0].click()
                                     found_action = True
@@ -550,7 +562,7 @@ def run_bot():
                         close_ids = ["com.reddit.frontpage:id/close", "com.reddit.frontpage:id/dismiss", "com.reddit.frontpage:id/back"]
                         for cid in close_ids:
                             els = driver.find_elements(AppiumBy.ID, cid)
-                            if els:
+                            if els and els[0].is_enabled():
                                 print(f"[{i}] Clicking ID-based close: {cid}")
                                 els[0].click()
                                 found_action = True
