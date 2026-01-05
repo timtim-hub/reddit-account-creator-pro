@@ -11,6 +11,9 @@ from appium.options.android import UiAutomator2Options
 from appium.webdriver.common.appiumby import AppiumBy
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.actions.action_builder import ActionBuilder
+from selenium.webdriver.common.actions.pointer_input import PointerInput
+from selenium.webdriver.common.actions.mouse_button import MouseButton
 
 # --- Configuration ---
 EMAILS_CSV = '/Users/macbookpro13/androidvm/emails.csv'
@@ -35,6 +38,56 @@ CAPABILITIES = {
 }
 
 # --- Helper Functions ---
+
+def random_click(driver, element):
+    """Click a random point within the element's bounds for human-like interaction."""
+    try:
+        location = element.location
+        size = element.size
+        # Pick a point that isn't exactly the center
+        x = location['x'] + random.randint(int(size['width'] * 0.2), int(size['width'] * 0.8))
+        y = location['y'] + random.randint(int(size['height'] * 0.2), int(size['height'] * 0.8))
+        
+        actions = ActionBuilder(driver)
+        finger = actions.add_pointer_input(PointerInput.TOUCH, "finger")
+        finger.create_pointer_move(duration=0, x=x, y=y)
+        finger.create_pointer_down(MouseButton.LEFT)
+        finger.create_pointer_move(duration=random.randint(50, 150), x=x, y=y)
+        finger.create_pointer_up(MouseButton.LEFT)
+        actions.perform()
+        return True
+    except:
+        try:
+            element.click()
+            return True
+        except: return False
+
+def human_swipe(driver, start_x_pct, start_y_pct, end_x_pct, end_y_pct, duration_ms=None):
+    """Perform a swipe with randomized path and speed to mimic human motion."""
+    try:
+        window_size = driver.get_window_size()
+        w, h = window_size['width'], window_size['height']
+        
+        start_x = int(w * (start_x_pct + random.uniform(-0.05, 0.05)))
+        start_y = int(h * (start_y_pct + random.uniform(-0.05, 0.05)))
+        end_x = int(w * (end_x_pct + random.uniform(-0.05, 0.05)))
+        end_y = int(h * (end_y_pct + random.uniform(-0.05, 0.05)))
+        
+        if not duration_ms:
+            duration_ms = random.randint(600, 1300)
+            
+        actions = ActionBuilder(driver)
+        finger = actions.add_pointer_input(PointerInput.TOUCH, "finger")
+        finger.create_pointer_move(duration=0, x=start_x, y=start_y)
+        finger.create_pointer_down(MouseButton.LEFT)
+        # Add a mid-point for slightly curved motion
+        mid_x = (start_x + end_x) // 2 + random.randint(-40, 40)
+        mid_y = (start_y + end_y) // 2 + random.randint(-40, 40)
+        finger.create_pointer_move(duration=duration_ms // 2, x=mid_x, y=mid_y)
+        finger.create_pointer_move(duration=duration_ms // 2, x=end_x, y=end_y)
+        finger.create_pointer_up(MouseButton.LEFT)
+        actions.perform()
+    except: pass
 
 def generate_username():
     """Generates a random username."""
@@ -223,15 +276,26 @@ def run_bot():
         print(f"Error: {EMAILS_CSV} not found.")
         return
         
-    print(f"Found {len(credentials)} accounts to process.")
+    # Read used emails
+    used_emails = set()
+    if os.path.exists(USED_EMAILS_CSV):
+        with open(USED_EMAILS_CSV, mode='r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                used_emails.add(row['email'].strip().lower())
+
+    print(f"Found {len(credentials)} total accounts. {len(used_emails)} already processed.")
 
     # Process each account with a FRESH session
     for cred in credentials:
         email_addr = cred['email'].strip()
         password = cred['password'].strip()
         
-        # Skip if empty
+        # Skip if empty or already used
         if not email_addr: continue
+        if email_addr.lower() in used_emails:
+            print(f"Skipping already processed: {email_addr}")
+            continue
             
         username = generate_username()
         print(f"--- Processing: {email_addr} ---")
@@ -256,22 +320,11 @@ def run_bot():
                 # 1. Sign Up Button
                 print("Looking for Sign Up button...")
                 try:
-                    # Try finding the clickable parent or just click the text and hope it bubbles
-                    # Better: find the element with text "Sign up"
                     signup_text = wait.until(EC.presence_of_element_located((AppiumBy.XPATH, "//*[@text='Sign up']")))
-                    signup_text.click()
+                    random_sleep(2, 5)
+                    random_click(driver, signup_text)
                     print("Clicked Sign Up.")
-                    
-                    # Wait for navigation: "Sign up" text should disappear or "Email" should appear
-                    time.sleep(3)
-                    
-                    # Verify we moved
-                    if len(driver.find_elements(AppiumBy.XPATH, "//*[@text='Don’t have an account?']")) > 0:
-                        print("Click might have failed, trying coordinate click on Sign Up...")
-                        # Fallback click
-                        signup_text.click()
-                        time.sleep(3)
-
+                    random_sleep(3, 5)
                 except Exception as e:
                      print(f"Could not find signup button: {e}")
                      driver.save_screenshot(f"debug_signup_fail_{username}.png")
@@ -280,17 +333,15 @@ def run_bot():
                 # 2. Email or Continue with Email
                 print("Handling Email selection...")
                 try:
-                    # Look for "Continue with email" button
                     try:
-                         # Try ID first
                         cont_email = wait.until(EC.presence_of_element_located((AppiumBy.ID, "com.reddit.frontpage:id/continue_with_email")))
-                        cont_email.click()
+                        random_click(driver, cont_email)
                     except:
-                        # Try Accessibility ID
                          cont_email = wait.until(EC.presence_of_element_located((AppiumBy.ACCESSIBILITY_ID, "Continue with email")))
-                         cont_email.click()
+                         random_click(driver, cont_email)
                     
                     print("Clicked 'Continue with email'.")
+                    random_sleep(2, 4)
                 except:
                     print("Did not find 'Continue with Email' button, assuming direct input or different flow.")
                 
@@ -318,30 +369,30 @@ def run_bot():
 
                 # 3. Verification Code
                 print("Waiting 10 seconds for verification code to arrive...")
-                time.sleep(10)
+                random_sleep(10, 12)
                 print("Checking for verification code...")
                 code = get_verification_code(email_addr, password)
                 if code:
                     print(f"Got code: {code}")
                     try:
-                        # Try Class Name as it's likely the only edit text
                         try:
                             code_field = wait.until(EC.presence_of_element_located((AppiumBy.CLASS_NAME, "android.widget.EditText")))
-                            code_field.click()
+                            random_click(driver, code_field)
                             code_field.send_keys(code)
                         except:
                             code_field = wait.until(EC.presence_of_element_located((AppiumBy.XPATH, "//*[contains(@resource-id, 'code_input_field')]")))
-                            code_field.click()
+                            random_click(driver, code_field)
                             code_field.send_keys(code)
                         
                         print("Entered code.")
+                        random_sleep(2, 4)
                         
                         try:
                             continue_btn = wait.until(EC.presence_of_element_located((AppiumBy.ID, "com.reddit.frontpage:id/continue_button")))
-                            continue_btn.click()
+                            random_click(driver, continue_btn)
                         except:
                             continue_btn = wait.until(EC.presence_of_element_located((AppiumBy.XPATH, "//*[@text='Continue' or @text='Next']")))
-                            continue_btn.click()
+                            random_click(driver, continue_btn)
                             
                     except Exception as e:
                         print(f"Failed to enter code: {e}")
@@ -354,12 +405,11 @@ def run_bot():
 
                 # 4. Username / Password
                 print("Handling Next Steps (Username/Password)...")
-                time.sleep(5)
+                random_sleep(4, 7)
                 
                 # --- USERNAME STEP ---
                 step_success = False
                 try:
-                    # Check for username field
                     username_field = None
                     try:
                         username_field = driver.find_element(AppiumBy.XPATH, "//*[contains(@resource-id, 'text_auto_fill')]")
@@ -370,9 +420,12 @@ def run_bot():
                     
                     if username_field:
                         print("Found Username field.")
+                        # Clear with randomized speed if possible, but clear() is fine
+                        random_click(driver, username_field)
                         username_field.clear()
                         username_field.send_keys(username)
                         print("Entered username.")
+                        random_sleep(1, 3)
                         
                         try:
                             if driver.is_keyboard_shown():
@@ -380,25 +433,23 @@ def run_bot():
                                 print("Hidden keyboard.")
                         except: pass
                         
-                        time.sleep(2)
+                        random_sleep(1, 3)
                         
-                        # Click Continue - Robust Method
+                        # Click Continue
                         print("Attempting to click Continue after username...")
                         try:
-                             # Wait for element to be present and clickable
                              continue_btn = wait.until(EC.element_to_be_clickable((AppiumBy.XPATH, "//*[@text='Continue' or @text='Next' or @resource-id='com.reddit.frontpage:id/continue_button']")))
-                             continue_btn.click()
+                             random_click(driver, continue_btn)
                              print("Clicked Continue/Next.")
                              step_success = True
                         except Exception as e:
                              print(f"Primary Continue click failed: {e}")
-                             # Fallback: Try strictly by ID if XPath failed
                              try:
-                                 driver.find_element(AppiumBy.ID, "com.reddit.frontpage:id/continue_button").click()
+                                 btn = driver.find_element(AppiumBy.ID, "com.reddit.frontpage:id/continue_button")
+                                 random_click(driver, btn)
                                  print("Clicked Continue (ID Fallback).")
                                  step_success = True
-                             except Exception as e2:
-                                 print(f"ID Fallback failed: {e2}")
+                             except: pass
 
                         # Wait for transition
                         time.sleep(5)
@@ -523,44 +574,40 @@ def run_bot():
                         if genders:
                             print(f"[{i}] Found gender selection, choosing first option...")
                             try:
-                                genders[0].click()
-                                time.sleep(2)
+                                random_click(driver, genders[0])
+                                random_sleep(2, 4)
                                 # Look for a clickable button
                                 next_btns = driver.find_elements(AppiumBy.XPATH, "//*[@text='Next' or @text='Continue']")
                                 for b in next_btns:
                                     if b.is_enabled() and (b.get_attribute("clickable") == "true" or b.find_elements(AppiumBy.XPATH, "..[@clickable='true']")):
-                                        b.click()
+                                        random_click(driver, b)
                                         print(f"[{i}] Clicked Next after gender.")
                                         break
-                                time.sleep(3)
+                                random_sleep(3, 5)
                             except: pass
                             continue
 
                         # 2. Interests / Topics
-                        # Look for text views that look like chips (short text, clickable)
                         interests = driver.find_elements(AppiumBy.XPATH, "//android.widget.TextView[string-length(@text) > 2 and string-length(@text) < 20]")
                         interest_chips = [el for el in interests if el.text.strip() and " " not in el.text.strip() and el.text.lower() not in ["next", "continue", "skip"]]
                         
-                        if len(interest_chips) > 5: # Likely the interests screen
+                        if len(interest_chips) > 5:
                             print(f"[{i}] Found {len(interest_chips)} potential interests. Selecting 5...")
                             clicked_count = 0
                             for item in interest_chips:
                                 try:
-                                    item.click()
+                                    random_click(driver, item)
                                     clicked_count += 1
-                                    time.sleep(0.5)
+                                    random_sleep(0.5, 1.5)
                                     if clicked_count >= 5: break
                                 except: pass
                             
-                            # Click Continue after selecting
-                            time.sleep(2)
+                            random_sleep(2, 4)
                             next_btns = driver.find_elements(AppiumBy.XPATH, "//*[@text='Next' or @text='Continue']")
                             for b in next_btns:
-                                # Ensure we click something that is actually clickable
                                 is_clickable = b.get_attribute("clickable") == "true"
                                 target = b
                                 if not is_clickable:
-                                     # Try parent
                                      try:
                                          parent = b.find_element(AppiumBy.XPATH, "..")
                                          if parent.get_attribute("clickable") == "true":
@@ -570,8 +617,8 @@ def run_bot():
 
                                 if is_clickable and b.is_enabled():
                                     print(f"[{i}] Clicking {b.text or 'Button'} after picking {clicked_count} interests.")
-                                    target.click()
-                                    time.sleep(3)
+                                    random_click(driver, target)
+                                    random_sleep(3, 5)
                                     break
                             continue
 
@@ -580,7 +627,6 @@ def run_bot():
                         advance_texts = ["Continue", "Next", "Allow", "Agree", "I agree"]
                         
                         found_action = False
-                        # Combine them to search efficiently
                         for text in dismiss_texts + advance_texts:
                             btns = driver.find_elements(AppiumBy.XPATH, f"//*[@text='{text}']")
                             for b in btns:
@@ -588,7 +634,6 @@ def run_bot():
                                     is_clickable = b.get_attribute("clickable") == "true"
                                     target = b
                                     if not is_clickable:
-                                        # One level up check
                                         try:
                                             p = b.find_element(AppiumBy.XPATH, "..")
                                             if p.get_attribute("clickable") == "true":
@@ -598,13 +643,13 @@ def run_bot():
                                     
                                     if is_clickable:
                                         print(f"[{i}] Clicking '{text}'...")
-                                        target.click()
+                                        random_click(driver, target)
                                         found_action = True
                                         break
                             if found_action: break
                                     
                         if found_action:
-                            time.sleep(4)
+                            random_sleep(4, 6)
                             continue
                         
                         # 4. Resource-ID based close (often a small X)
@@ -657,58 +702,68 @@ def run_bot():
 
                 # --- FINAL VERIFICATION & SCRAPE ---
                 print("Verifying Login & Scraping Username...")
-                time.sleep(3)
+                # Randomized delay to look human
+                time.sleep(random.uniform(3, 7))
                 
-                # Ditch effort to clear one last overlay if avatar is missing
-                if not driver.find_elements(AppiumBy.ID, "com.reddit.frontpage:id/toolbar_home_avatar"):
+                # Check if we are on Home first
+                is_on_home = False
+                if driver.find_elements(AppiumBy.ID, "com.reddit.frontpage:id/toolbar_home_avatar") or \
+                   driver.find_elements(AppiumBy.ACCESSIBILITY_ID, "Open navigation drawer"):
+                    is_on_home = True
+                
+                if not is_on_home:
                     print("Avatar missing during verification, trying one last dismiss...")
                     last_btns = driver.find_elements(AppiumBy.XPATH, "//*[@text='Skip' or @text='Continue' or @text='Next' or @text='Maybe Later' or @text='Not now']")
                     if last_btns:
                         print(f"Found {len(last_btns)} last-minute actions. Clicking first...")
-                        try: last_btns[0].click()
+                        try: 
+                            last_btns[0].click()
+                            time.sleep(random.uniform(2, 5))
+                            if driver.find_elements(AppiumBy.ID, "com.reddit.frontpage:id/toolbar_home_avatar"):
+                                is_on_home = True
                         except: pass
-                        time.sleep(3)
 
                 real_username = None
                 is_logged_in = False
                 
                 # Open Drawer to see username
-                try:
-                    avatar = wait.until(EC.presence_of_element_located((AppiumBy.ID, "com.reddit.frontpage:id/toolbar_home_avatar")))
-                    avatar.click()
-                    time.sleep(2)
-                    
-                    # Scrape Username
+                if is_on_home:
                     try:
-                        # Priority 1: Navigation header
-                        uname_el = driver.find_element(AppiumBy.ID, "com.reddit.frontpage:id/drawer_nav_header_account_name")
-                        real_username = uname_el.text.replace("u/", "")
-                        print(f"Captured real username: {real_username}")
-                        is_logged_in = True
-                    except:
-                        # Priority 2: XPATH for u/
+                        avatar = driver.find_element(AppiumBy.ID, "com.reddit.frontpage:id/toolbar_home_avatar")
+                        avatar.click()
+                        time.sleep(random.uniform(2, 4))
+                        
+                        # Scrape Username
                         try:
-                            uname_el = driver.find_element(AppiumBy.XPATH, "//*[contains(@text, 'u/')]")
-                            real_username = uname_el.text.replace("u/", "").strip()
-                            print(f"Captured real username (fallback): {real_username}")
+                            # Priority 1: Navigation header
+                            uname_el = driver.find_element(AppiumBy.ID, "com.reddit.frontpage:id/drawer_nav_header_account_name")
+                            real_username = uname_el.text.replace("u/", "")
+                            print(f"Captured real username: {real_username}")
                             is_logged_in = True
                         except:
-                            print("Could not scrape username from drawer.")
-                            # Try to close drawer
-                            driver.back()
-
-                except:
-                    print("Avatar not immediately found.")
-                    driver.save_screenshot(f"debug_login_fail_{username}.png")
-                    
-                if not is_logged_in:
-                    print("FAILURE: Login verification/Scraping failed.")
-                else:
-                    # Use the REAL username for saving
-                    final_username = real_username if real_username else username
+                            # Priority 2: XPATH for u/
+                            try:
+                                uname_el = driver.find_element(AppiumBy.XPATH, "//*[contains(@text, 'u/')]")
+                                real_username = uname_el.text.replace("u/", "").strip()
+                                print(f"Captured real username (fallback): {real_username}")
+                                is_logged_in = True
+                            except:
+                                print("Could not scrape username from drawer.")
+                                # Try to close drawer
+                                driver.back()
+                    except Exception as drawer_err:
+                        print(f"Error accessing drawer: {drawer_err}")
+                
+                # FINAL DECISION: If we reached Home, it's a success
+                if is_on_home or is_logged_in:
+                    final_username = real_username if real_username else f"User_{username}"
                     print(f"SUCCESS: Account {final_username} flow completed.")
                     save_account_info(email, password, final_username)
+                    log_used_email(email)
                     remove_email_from_list(email)
+                else:
+                    print("FAILURE: Home not detected and login verification failed.")
+                    take_screenshot(driver, f"debug_login_fail_{username}")
 
             except Exception as e:
                 print(f"Error processing {email}: {e}")
