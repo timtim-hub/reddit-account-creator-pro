@@ -13,7 +13,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # --- Configuration ---
-EMAILS_CSV = '/Users/macbookpro13/.gemini/antigravity/brain/3a25b92f-65d9-4ae9-bbf8-543ae64656e7/emails.csv'
+EMAILS_CSV = '/Users/macbookpro13/androidvm/emails.csv'
 IMAP_SERVER = 'imap.gmx.com'
 IMAP_PORT = 993
 
