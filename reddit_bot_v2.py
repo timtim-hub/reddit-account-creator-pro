@@ -176,26 +176,36 @@ def log_used_email(email):
         writer.writerow([email])
 
 def find_and_click_button(driver, wait, logger, button_texts, description, timeout=10):
-    """Generic function to find and click buttons by text."""
+    """Generic function to find and click buttons by text, accessibility ID, or resource ID."""
     logger.log(f"Looking for {description}: {button_texts}")
     logger.screenshot(driver, f"before_{description.replace(' ', '_')}")
     
     for text in button_texts:
-        try:
-            elements = driver.find_elements(AppiumBy.XPATH, f"//*[@text='{text}']")
-            for elem in elements:
-                if elem.is_displayed() and elem.is_enabled():
-                    logger.log(f"Found '{text}' button")
-                    random_click(driver, elem, logger)
-                    random_sleep(2, 4)
-                    logger.screenshot(driver, f"after_{description.replace(' ', '_')}")
-                    return True
-        except Exception as e:
-            logger.log(f"Error finding '{text}': {e}", "WARN")
+        # Try multiple locator strategies
+        locators = [
+            (AppiumBy.XPATH, f"//*[@text='{text}']"),
+            (AppiumBy.ACCESSIBILITY_ID, text),
+            (AppiumBy.XPATH, f"//*[@content-desc='{text}']"),
+            (AppiumBy.XPATH, f"//*[contains(@resource-id, '{text.lower().replace(' ', '_')}')]"),
+        ]
+        
+        for locator_type, locator_value in locators:
+            try:
+                elements = driver.find_elements(locator_type, locator_value)
+                for elem in elements:
+                    if elem.is_displayed() and elem.is_enabled():
+                        logger.log(f"Found '{text}' via {locator_type}")
+                        random_click(driver, elem, logger)
+                        random_sleep(2, 4)
+                        logger.screenshot(driver, f"after_{description.replace(' ', '_')}")
+                        return True
+            except Exception as e:
+                pass  # Try next locator
     
     logger.log(f"Could not find any of: {button_texts}", "ERROR")
     logger.save_page_source(driver, f"missing_{description.replace(' ', '_')}")
     return False
+
 
 def run_bot():
     print("=" * 80)
