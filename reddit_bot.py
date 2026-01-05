@@ -317,7 +317,9 @@ def run_bot():
                      continue
 
                 # 3. Verification Code
-                print("Waiting for verification code from email...")
+                print("Waiting 10 seconds for verification code to arrive...")
+                time.sleep(10)
+                print("Checking for verification code...")
                 code = get_verification_code(email_addr, password)
                 if code:
                     print(f"Got code: {code}")
