@@ -463,19 +463,53 @@ def run_bot():
                              
                              # Click Continue
                              print("Clicking Continue after password...")
+                             success_click = False
                              try:
-                                 # Use ID if possible
-                                 wait.until(EC.element_to_be_clickable((AppiumBy.ID, "com.reddit.frontpage:id/continue_button"))).click()
+                                 # Try strictly by ID and check clickable
+                                 btn = wait.until(EC.presence_of_element_located((AppiumBy.ID, "com.reddit.frontpage:id/continue_button")))
+                                 # Find the clickable child if the main one isn't
+                                 if btn.get_attribute("clickable") != "true":
+                                     # Try children
+                                     print("Base button not clickable, searching for clickable child...")
+                                     clickables = btn.find_elements(AppiumBy.XPATH, ".//*[@clickable='true']")
+                                     if clickables: 
+                                         clickables[0].click()
+                                         success_click = True
+                                     else: btn.click() # Fallback
+                                 else:
+                                     btn.click()
+                                     success_click = True
                                  print("Clicked Continue (ID).")
                              except:
                                  # Fallback to text
                                  btns = driver.find_elements(AppiumBy.XPATH, "//*[@text='Continue' or @text='Next']")
                                  for b in btns:
-                                     if b.is_enabled():
+                                     # Check for clickable parent or self
+                                     is_clickable = b.get_attribute("clickable") == "true"
+                                     if not is_clickable:
+                                         # Try to find a clickable parent (up to 3 levels)
+                                         curr = b
+                                         for _ in range(3):
+                                             try:
+                                                 curr = curr.find_element(AppiumBy.XPATH, "..")
+                                                 if curr.get_attribute("clickable") == "true":
+                                                     is_clickable = True
+                                                     b = curr
+                                                     break
+                                             except: break
+                                     
+                                     if is_clickable and b.is_enabled():
                                          b.click()
-                                         print(f"Clicked {b.text} (Text Fallback).")
+                                         print(f"Clicked {b.text or 'Button'} (Text Fallback).")
+                                         success_click = True
                                          break
-                             time.sleep(5)
+                             
+                             if success_click:
+                                 time.sleep(5)
+                                 # Verify we actually moved from the password screen
+                                 if driver.find_elements(AppiumBy.XPATH, "//*[contains(@text, 'password')]"):
+                                     print("Still on password screen after click. Might need retry or different button.")
+
                 except Exception as e:
                     print(f"Password step error: {e}")
                     pass
@@ -491,20 +525,20 @@ def run_bot():
                             try:
                                 genders[0].click()
                                 time.sleep(2)
-                                next_btn = driver.find_elements(AppiumBy.XPATH, "//*[@text='Next' or @text='Continue']")
-                                if next_btn: 
-                                    next_btn[0].click()
-                                    print(f"[{i}] Clicked Next after gender.")
+                                # Look for a clickable button
+                                next_btns = driver.find_elements(AppiumBy.XPATH, "//*[@text='Next' or @text='Continue']")
+                                for b in next_btns:
+                                    if b.is_enabled() and (b.get_attribute("clickable") == "true" or b.find_elements(AppiumBy.XPATH, "..[@clickable='true']")):
+                                        b.click()
+                                        print(f"[{i}] Clicked Next after gender.")
+                                        break
                                 time.sleep(3)
                             except: pass
                             continue
 
                         # 2. Interests / Topics
                         # Look for text views that look like chips (short text, clickable)
-                        # Reddit often has "Select at least 3"
-                        # Chips are often in ScrollViews and might not have 'clickable=true' but their parent might
                         interests = driver.find_elements(AppiumBy.XPATH, "//android.widget.TextView[string-length(@text) > 2 and string-length(@text) < 20]")
-                        # Filter for things that look like tags (no spaces or specific patterns)
                         interest_chips = [el for el in interests if el.text.strip() and " " not in el.text.strip() and el.text.lower() not in ["next", "continue", "skip"]]
                         
                         if len(interest_chips) > 5: # Likely the interests screen
@@ -522,37 +556,52 @@ def run_bot():
                             time.sleep(2)
                             next_btns = driver.find_elements(AppiumBy.XPATH, "//*[@text='Next' or @text='Continue']")
                             for b in next_btns:
-                                if b.is_enabled():
-                                    print(f"[{i}] Clicking {b.text} after picking {clicked_count} interests.")
-                                    b.click()
+                                # Ensure we click something that is actually clickable
+                                is_clickable = b.get_attribute("clickable") == "true"
+                                target = b
+                                if not is_clickable:
+                                     # Try parent
+                                     try:
+                                         parent = b.find_element(AppiumBy.XPATH, "..")
+                                         if parent.get_attribute("clickable") == "true":
+                                             is_clickable = True
+                                             target = parent
+                                     except: pass
+
+                                if is_clickable and b.is_enabled():
+                                    print(f"[{i}] Clicking {b.text or 'Button'} after picking {clicked_count} interests.")
+                                    target.click()
                                     time.sleep(3)
                                     break
                             continue
 
                         # 3. Generic Action Buttons
-                        # Priority: Skip/Maybe Later/Not Now, then Continue/Next
                         dismiss_texts = ["Skip", "Maybe Later", "Not now", "Deny", "Close", "No thanks"]
                         advance_texts = ["Continue", "Next", "Allow", "Agree", "I agree"]
                         
                         found_action = False
-                        # Try dismiss buttons first
-                        for d_text in dismiss_texts:
-                            btns = driver.find_elements(AppiumBy.XPATH, f"//*[@text='{d_text}']")
-                            if btns and btns[0].is_displayed() and btns[0].is_enabled():
-                                print(f"[{i}] Clicking '{d_text}'...")
-                                btns[0].click()
-                                found_action = True
-                                break
-                        
-                        if not found_action:
-                            # Try advance buttons
-                            for a_text in advance_texts:
-                                btns = driver.find_elements(AppiumBy.XPATH, f"//*[@text='{a_text}']")
-                                if btns and btns[0].is_displayed() and btns[0].is_enabled():
-                                    print(f"[{i}] Clicking '{a_text}'...")
-                                    btns[0].click()
-                                    found_action = True
-                                    break
+                        # Combine them to search efficiently
+                        for text in dismiss_texts + advance_texts:
+                            btns = driver.find_elements(AppiumBy.XPATH, f"//*[@text='{text}']")
+                            for b in btns:
+                                if b.is_displayed() and b.is_enabled():
+                                    is_clickable = b.get_attribute("clickable") == "true"
+                                    target = b
+                                    if not is_clickable:
+                                        # One level up check
+                                        try:
+                                            p = b.find_element(AppiumBy.XPATH, "..")
+                                            if p.get_attribute("clickable") == "true":
+                                                is_clickable = True
+                                                target = p
+                                        except: pass
+                                    
+                                    if is_clickable:
+                                        print(f"[{i}] Clicking '{text}'...")
+                                        target.click()
+                                        found_action = True
+                                        break
+                            if found_action: break
                                     
                         if found_action:
                             time.sleep(4)
@@ -581,6 +630,7 @@ def run_bot():
                         print(f"Skip loop error at iteration {i}: {e}")
                         pass
                     time.sleep(2)
+
 
                 # --- BEHAVIOR EMULATION ---
                 print("Emulating User Behavior (Swipe, Upvote)...")
