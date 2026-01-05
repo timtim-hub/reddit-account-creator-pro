@@ -290,7 +290,30 @@ def run_bot():
 
     print(f"Found {len(credentials)} total accounts. {len(used_emails)} already processed.")
 
-    # Process each account with a FRESH session
+    # Initialize driver ONCE for all accounts
+    driver = None
+    wait = None
+    first_account = True
+    
+    try:
+        print("Initializing Appium session...")
+        import subprocess
+        
+        # Clear data only for the first account
+        print("Clearing app data for fresh start...")
+        subprocess.run(["adb", "shell", "pm", "clear", "com.reddit.frontpage"])
+        
+        options = UiAutomator2Options().load_capabilities(CAPABILITIES)
+        driver = webdriver.Remote(APPIUM_SERVER_URL, options=options)
+        wait = WebDriverWait(driver, 20)
+        print("Appium session initialized successfully!")
+        random_sleep(3, 5)
+        
+    except Exception as e:
+        print(f"Failed to initialize Appium session: {e}")
+        return
+
+    # Process each account with the SAME session
     for cred in credentials:
         email_addr = cred['email'].strip()
         password = cred['password'].strip()
@@ -303,24 +326,9 @@ def run_bot():
             
         username = generate_username()
         print(f"--- Processing: {email_addr} ---")
-        
-        # Initialize driver for THIS account (ensures noReset=False clears data)
-        driver = None
-        try:
-            print("Clearing app data...")
-            import subprocess
-            subprocess.run(["adb", "shell", "pm", "clear", "com.reddit.frontpage"])
-            
-            print("Initializing new Appium session...")
-            options = UiAutomator2Options().load_capabilities(CAPABILITIES)
-            driver = webdriver.Remote(APPIUM_SERVER_URL, options=options)
-            wait = WebDriverWait(driver, 20)
-            
-            # App is already launched by session start
-            time.sleep(5)
 
-            # Signup Flow
-            try:
+        # Signup Flow
+        try:
                 # 1. Sign Up Button
                 print("Looking for Sign Up button...")
                 try:
@@ -765,26 +773,24 @@ def run_bot():
                     save_account_info(email, password, final_username)
                     log_used_email(email)
                     remove_email_from_list(email)
-                else:
-                    print("FAILURE: Home not detected and login verification failed.")
-                    take_screenshot(driver, f"debug_login_fail_{username}")
-
-            except Exception as e:
-                print(f"Error processing {email}: {e}")
-                if driver:
-                    driver.save_screenshot(f"error_{email}.png")
-                    try: 
-                        with open(f"error_source_{email}.xml", "w") as f: f.write(driver.page_source)
-                    except: pass
-
-            finally:
-                if driver:
-                    print("Session closed.")
-                    try: driver.quit()
-                    except: pass
+                print("FAILURE: Home not detected and login verification failed.")
+                take_screenshot(driver, f"debug_login_fail_{username}")
 
         except Exception as e:
-            print(f"Outer Loop Error (e.g. Init): {e}")
+            print(f"Error processing {email_addr}: {e}")
+            if driver:
+                try:
+                    driver.save_screenshot(f"error_{email_addr}.png")
+                    with open(f"error_source_{email_addr}.xml", "w") as f: 
+                        f.write(driver.page_source)
+                except: pass
+    
+    # Close driver after ALL accounts are processed
+    if driver:
+        print("All accounts processed. Closing session.")
+        try: 
+            driver.quit()
+        except: pass
             
 if __name__ == "__main__":
     run_bot()
