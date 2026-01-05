@@ -39,6 +39,10 @@ CAPABILITIES = {
 
 # --- Helper Functions ---
 
+def random_sleep(min_s=1, max_s=3):
+    """Sleep for a random amount of time to look human."""
+    time.sleep(random.uniform(min_s, max_s))
+
 def random_click(driver, element):
     """Click a random point within the element's bounds for human-like interaction."""
     try:
@@ -781,7 +785,6 @@ def run_bot():
 
         except Exception as e:
             print(f"Outer Loop Error (e.g. Init): {e}")
-            pass
             
 if __name__ == "__main__":
     run_bot()
