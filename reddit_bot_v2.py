@@ -94,7 +94,7 @@ def random_click(driver, element, logger):
         y = location['y'] + random.randint(int(size['height'] * 0.2), int(size['height'] * 0.8))
         
         actions = ActionBuilder(driver)
-        finger = actions.add_pointer_input(PointerInput.TOUCH, "finger")
+        finger = actions.add_pointer_input("touch", "finger")
         finger.create_pointer_move(duration=0, x=x, y=y)
         finger.create_pointer_down(MouseButton.LEFT)
         finger.create_pointer_move(duration=random.randint(50, 150), x=x, y=y)
@@ -233,25 +233,9 @@ def run_bot():
 
     print(f"Found {len(credentials)} total accounts. {len(used_emails)} already processed.")
     
-    # Initialize driver ONCE
+    # Initialize driver variable
     driver = None
-    wait = None
     
-    try:
-        print("Initializing Appium session...")
-        import subprocess
-        subprocess.run(["adb", "shell", "pm", "clear", "com.reddit.frontpage"])
-        
-        options = UiAutomator2Options().load_capabilities(CAPABILITIES)
-        driver = webdriver.Remote(APPIUM_SERVER_URL, options=options)
-        wait = WebDriverWait(driver, 20)
-        print("✓ Appium session initialized successfully!")
-        random_sleep(3, 5)
-        
-    except Exception as e:
-        print(f"✗ Failed to initialize Appium session: {e}")
-        return
-
     # Process each account
     for cred in credentials:
         email_addr = cred['email'].strip()
@@ -260,6 +244,33 @@ def run_bot():
         if not email_addr: continue
         if email_addr.lower() in used_emails:
             print(f"⊘ Skipping already processed: {email_addr}")
+            continue
+
+        # ROTATE ANDROID ID FOR STEALTH
+        new_android_id = ''.join(random.choices('0123456789abcdef', k=16))
+        print(f"Rotating Android ID to: {new_android_id}")
+        import subprocess
+        subprocess.run(["adb", "shell", "settings", "put", "secure", "android_id", new_android_id])
+        
+        # CLEAR APP DATA FOR FRESH START
+        print("Clearing app data for new user simulation...")
+        subprocess.run(["adb", "shell", "pm", "clear", "com.reddit.frontpage"])
+        
+        # RE-INITIALIZE DRIVER
+        # We need to restart the driver because clearing app data kills the app process
+        if driver:
+            try: driver.quit()
+            except: pass
+            
+        try:
+            print("Initializing new Appium session for fresh user...")
+            options = UiAutomator2Options().load_capabilities(CAPABILITIES)
+            driver = webdriver.Remote(APPIUM_SERVER_URL, options=options)
+            wait = WebDriverWait(driver, 20)
+            print("✓ Appium session initialized successfully!")
+            random_sleep(3, 5)
+        except Exception as e:
+            print(f"✗ Failed to initialize Appium session: {e}")
             continue
         
         # Create logger for this account
